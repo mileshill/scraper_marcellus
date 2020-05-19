@@ -46,15 +46,13 @@ class MarcellusSpider(scrapy.Spider):
         yield scrapy_splash.SplashRequest(url=response.url, callback=self.parse_production_report, args={"wait": 2})
 
     def parse_production_report(self, response):
-        # Write the body for local testing
-        with open("production_report.html", "wb") as fout:
-            fout.write(response.body)
-
         counties = self.get_county_names(response)
         county_ids = self.get_county_ids(response)
 
         county_dict = dict()
         data = list()
+
+        # Scrape the production report page to gather all the table data; county, township, well_name, link_to_report
         for county_idx, county in enumerate(county_ids):
             townships = self.get_townships_by_county_id(response, county)
             county_dict[county] = {"townships": townships}
@@ -62,25 +60,17 @@ class MarcellusSpider(scrapy.Spider):
             for idx, link in enumerate(county_dict[county]["links"]):
                 table_rows = self.get_table_rows(response, link)
                 county_dict[county][townships[idx]] = table_rows
+                # Get all the wells in the county/township
                 for row in table_rows:
                     row["county"] = counties[county_idx]
                     row["township"] = townships[idx]
-
+                # Update `data` with the wells from county/township
                 data += table_rows
 
         # This is where the magic of all the data comes from!
         # Download each of the links to all the well reports and download the reports for those wells.
-        # TODO expand for multiple well on given pad
-        with open("/home/miles/PycharmProjects/marcellus/marcellus/well_still_required.txt", "r") as fin:
-            needed_wells = fin.readlines()
-            needed_wells = [well.strip() for well in needed_wells]
         for row in data:
             link = row["link"]
-            well_name = row["well_name"].replace(" ", "_").lower()
-            print("Row Well Name: ", row["well_name"], " Parsed: ", well_name, " Needed: ", well_name in needed_wells)
-            if well_name not in needed_wells:
-                continue
-            print("Downloading: ", well_name)
             yield scrapy.Request(url=f"{self.BASE_URL}{link}", callback=self.parse_well_report, meta={"row": row})
 
     def check_for_persisted(self, row):
@@ -89,31 +79,57 @@ class MarcellusSpider(scrapy.Spider):
         return True if record is not None else False
 
     def parse_well_report(self, response):
+        """
+        Parse the production well report based on a given well_id.
+        This is the callback function that execute for each Production Report - Well Report is followed
+        :param response:  Result response object from the well_id-well production report
+        :return:
+        """
+        # Split the URL where the parameters being.
         page = response.url.split(".php?")[-1]
+
+        # Get the well_id from the remaining part of the URL
         well_id = re.match(r".*well_id=([0-9]+)", page).group(1)
+
+        # Follow the link
         return self.parse_by_well_id(response, well_id, row=response.meta["row"])
 
     def parse_by_well_id(self, response, well_id, row):
-        # Get the dom element
+        # Get the desired DOM element
         dom = response.xpath(f"//div[@id='pro_{well_id}']").extract()
         if len(dom) == 0:
             return
+
+        # Sometimes errors occur
         try:
+            # Extract the first (and only) element
             dom = dom[0]
+
+            # Replace all the whitespace characters with null strings
             no_ws = re.sub(r"\s", "", dom)
+
+            # Remove all the HTMl tags. Replace those tags with newline characters
             no_tags = re.sub(r"<.*?>", "\n", no_ws)
         except Exception as e:
             self.logger.exception(e)
             return
+        # Split into a nice list
         list_report = re.split(r"\n+", no_tags)
+
+        # This is the itertools.groupby method, not the pandas groupby. It works differently!
+        # The list is split each time the lambda function is True. This allows for unique keys to
+        # be creates where the `OperatingPeriod` is the key
         unique_keys = list()
         groups = list()
         for k, g in groupby(list_report, lambda x: "OperatingPeriod" in x):
             unique_keys.append(k)
             groups.append(list(g))
 
+        # Create a dict object out of the iterrated report
         report_dict = {}
         for idx, (key, group) in enumerate(zip(unique_keys, groups)):
+            # if key is True means that the element of groups[idx][0] has 'OperatingPeriod' in the string.
+            # The 'OperatingPeriod' becomes the key for the remaining fields of the report
             if key is True:
                 report_dict[groups[idx][0]] = groups[idx + 1]
 
@@ -122,8 +138,6 @@ class MarcellusSpider(scrapy.Spider):
         prod_report["township"] = row["township"]
         prod_report["well_name"] = row["well_name"]
         prod_report["production_report"] = report_dict
-        # with open(f"{well_id}_prod_report.json", "w") as fout:
-        #    fout.write(json.dumps(report_dict, indent=4, sort_keys=True))
         return prod_report
 
     def parse_production_report_table(self, response):

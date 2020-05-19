@@ -11,7 +11,19 @@ from scrapy.exceptions import DropItem
 
 
 class MarcellusPipeline:
+    """
+    This is the first pipeline each item flows through.
+    Items will be processed to remove unnecessary or bad elements. Production report data are extracted for
+    a clean structure ready for MongoDB insert in a later pipeline
+    """
+
     def process_item(self, item, spider):
+        """
+        Default method to be called for each item
+        :param item:
+        :param spider:
+        :return:
+        """
         item = self.process_production_report(item)
         return item
 
@@ -38,6 +50,12 @@ class MarcellusPipeline:
         return item
 
     def clean_production_report(self, records):
+        """
+        For every field in the report, some clean is required. Most is done with Regex extraction of the desired
+        data group.
+        :param records:
+        :return:
+        """
         parsed = list()
         for record in records:
             avg_production = self.clean_average_production(record)
@@ -115,6 +133,10 @@ class MarcellusPipeline:
 
 
 class MongoDBPipeline:
+    """
+    Dump the data into MongoDB
+    """
+
     def __init__(self):
         connection = pymongo.MongoClient("localhost", 27017)
         db = connection["marcellus"]
