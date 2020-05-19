@@ -2,7 +2,7 @@
 
 
 
-
+## Crawl
 ```shell
 # Create your environment
 conda create --name=marcellus python=3.8
@@ -23,4 +23,10 @@ docker run -d -p 27017:27017 --network=host --name=mongo mongo
 # Execute before bed :)
 cd /path/to/project/marcellus/marcellus
 scrapy crawl marcellus
+```
+
+## Explore
+```shell
+# The local mongo needs populated before this becomes interesting
+streamlit run app.py
 ```
